@@ -1,0 +1,11 @@
+services:
+  ronergate:
+    build: .
+    container_name: ronergate
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ronergate-data:/app/data
+
+volumes:
+  ronergate-data:
