@@ -34,6 +34,14 @@ class ROnergate(commands.Bot):
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s (id=%s)", self.user, self.user.id if self.user else None)
+        # Clear any guild-scoped commands left over from earlier deploys. Without this,
+        # they shadow the global set and old command listings linger forever.
+        for guild in self.guilds:
+            existing = await self.tree.fetch_commands(guild=guild)
+            if existing:
+                log.info("clearing %d guild commands in %s", len(existing), guild.name)
+                self.tree.clear_commands(guild=guild)
+                await self.tree.sync(guild=guild)
 
     async def _on_app_command_error(
         self, interaction: discord.Interaction, error: app_commands.AppCommandError
