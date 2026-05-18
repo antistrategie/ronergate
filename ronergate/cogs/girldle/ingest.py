@@ -182,6 +182,12 @@ def recompute_ratings(db: Database) -> None:
     last_played = _last_played_per_user(db.conn)
 
     with db.transaction() as conn:
+        # Drop players whose results have all been deleted. Otherwise the
+        # leaderboard would still count them with their stale rating.
+        conn.execute(
+            "DELETE FROM girldle_players WHERE user_id NOT IN "
+            "(SELECT DISTINCT user_id FROM girldle_results)"
+        )
         for user_id, r in ratings_by_user.items():
             conn.execute(
                 """
