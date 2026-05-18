@@ -28,9 +28,10 @@ and streaks, and exposes lookups via slash commands.
 | `/girldle privacy private:` | Manage Server | Hide this server from the global leaderboard. |
 | `/girldle backfill channel:? limit:? dry_run:?` | Manage Server | Read channel history and ingest historical results. |
 | `/girldle reset confirm:` | Manage Server | Wipe this server's posts. Canonical results survive if seen elsewhere. |
-| `/girldle approve guild_id: approved:?` | Bot owner | Approve or revoke a server's global-leaderboard visibility. |
-| `/girldle servers` | Bot owner | List all known servers, their channel, approval state, and post count. |
-| `/girldle remove guild_id:` | Bot owner | Drop a server's config and all its posts. Orphaned canonical results are also removed. |
+
+The bot owner has additional commands under a separate `/girldleadmin`
+group, registered only on the operator's home guild — see the
+[`girldle_admin` cog](../girldle_admin/README.md).
 
 ## Server approval
 
@@ -39,9 +40,10 @@ servers can still play and use `scope=server` leaderboards; they just don't
 appear on the global view until approved. The bot owner's own setups are
 auto-approved.
 
-To approve: run `/girldle servers` — pending entries are marked ⏳ and the
-embed has an **Approve** button per pending guild for one-click promotion. No
-notifications are pushed; you check when you want to.
+To approve: run `/girldleadmin servers` (on the operator's home guild) —
+pending entries are marked ⏳ and the embed has an **Approve** button per
+pending guild for one-click promotion. No notifications are pushed; you
+check when you want to.
 
 ## Data model
 

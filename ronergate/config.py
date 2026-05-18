@@ -14,6 +14,7 @@ class Config:
     db_path: str
     cogs: tuple[str, ...]
     control_channel_id: int | None
+    owner_guild_id: int | None
 
 
 def load() -> Config:
@@ -27,14 +28,12 @@ def load() -> Config:
     if not cogs:
         raise RuntimeError("COGS env var resolved to an empty list")
 
-    control_channel_id_raw = os.environ.get("CONTROL_CHANNEL_ID", "").strip()
-    control_channel_id = int(control_channel_id_raw) if control_channel_id_raw else None
-
     return Config(
         discord_token=token,
         db_path=db_path,
         cogs=cogs,
-        control_channel_id=control_channel_id,
+        control_channel_id=_optional_int("CONTROL_CHANNEL_ID"),
+        owner_guild_id=_optional_int("OWNER_GUILD_ID"),
     )
 
 
@@ -43,3 +42,8 @@ def _required(name: str) -> str:
     if not value:
         raise RuntimeError(f"Missing required env var: {name}")
     return value
+
+
+def _optional_int(name: str) -> int | None:
+    raw = os.environ.get(name, "").strip()
+    return int(raw) if raw else None

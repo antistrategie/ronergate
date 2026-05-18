@@ -11,6 +11,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from . import errors
+from .cogs.girldle.migrate import migrate as girldle_migrate
 from .config import Config, load
 from .db import Database
 
@@ -31,12 +32,25 @@ class ROnergate(commands.Bot):
         for ext in self.config.cogs:
             await self.load_extension(ext)
         await self.tree.sync()
+        if self.config.owner_guild_id is not None:
+            await self.tree.sync(guild=discord.Object(id=self.config.owner_guild_id))
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s (id=%s)", self.user, self.user.id if self.user else None)
-        # Clear any guild-scoped commands left over from earlier deploys. Without this,
-        # they shadow the global set and old command listings linger forever.
+        # Cache the names of every guild we're in so the leaderboard can
+        # render them even from a bot that isn't a member of that guild
+        # (we share the DB across bot instances).
         for guild in self.guilds:
+            self.db.conn.execute(
+                "UPDATE girldle_config SET name = ? WHERE guild_id = ?",
+                (guild.name, str(guild.id)),
+            )
+        # Clear any guild-scoped commands left over from earlier deploys.
+        # Skip the owner_guild_id since we intentionally use guild-scoped
+        # commands there for admin tools.
+        for guild in self.guilds:
+            if guild.id == self.config.owner_guild_id:
+                continue
             existing = await self.tree.fetch_commands(guild=guild)
             if existing:
                 log.info("clearing %d guild commands in %s", len(existing), guild.name)
@@ -69,6 +83,7 @@ async def _run() -> None:
     db = Database(config.db_path)
     cogs_dir = Path(__file__).parent / "cogs"
     db.bootstrap(cogs_dir)
+    girldle_migrate(db.conn)
 
     bot = ROnergate(config, db)
     try:
