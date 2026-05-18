@@ -418,11 +418,14 @@ class GirldleCog(commands.Cog):
         embed.set_footer(text=f"{len(rows)} shared puzzles")
         await interaction.response.send_message(embed=embed)
 
-    @girldle.command(name="styles", description="Top snipers and plodders.")
+    @girldle.command(name="styles", description="Top snipers and plodders in this server.")
     async def styles(self, interaction: discord.Interaction) -> None:
         if not await self._require_setup(interaction):
             return
-        ascending = analysis.snipers(self.db.conn, limit=10_000)
+        assert interaction.guild is not None
+        ascending = analysis.snipers(
+            self.db.conn, guild_id=str(interaction.guild.id), limit=10_000
+        )
         if not ascending:
             await interaction.response.send_message("Not enough data yet.")
             return

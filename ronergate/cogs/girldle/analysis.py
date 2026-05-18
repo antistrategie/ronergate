@@ -35,7 +35,7 @@ def _grid_auc(grid: str) -> float | None:
 
 
 def _player_grid_scores(
-    conn: sqlite3.Connection, *, ascending: bool, limit: int
+    conn: sqlite3.Connection, *, ascending: bool, limit: int, guild_id: str
 ) -> list[PlayerGridScore]:
     rows = list(
         conn.execute(
@@ -44,7 +44,11 @@ def _player_grid_scores(
             FROM girldle_results r
             LEFT JOIN girldle_players p ON p.user_id = r.user_id
             WHERE r.score IS NOT NULL
-            """
+              AND r.user_id IN (
+                  SELECT user_id FROM girldle_posts WHERE guild_id = ?
+              )
+            """,
+            (guild_id,),
         )
     )
 
@@ -74,11 +78,15 @@ def _player_grid_scores(
     return scored[:limit]
 
 
-def snipers(conn: sqlite3.Connection, limit: int = 10) -> list[PlayerGridScore]:
+def snipers(
+    conn: sqlite3.Connection, *, guild_id: str, limit: int = 10
+) -> list[PlayerGridScore]:
     """Players whose solved grids have the lowest green density (mostly red)."""
-    return _player_grid_scores(conn, ascending=True, limit=limit)
+    return _player_grid_scores(conn, ascending=True, limit=limit, guild_id=guild_id)
 
 
-def plodders(conn: sqlite3.Connection, limit: int = 10) -> list[PlayerGridScore]:
+def plodders(
+    conn: sqlite3.Connection, *, guild_id: str, limit: int = 10
+) -> list[PlayerGridScore]:
     """Players whose solved grids have the highest green density (mostly green)."""
-    return _player_grid_scores(conn, ascending=False, limit=limit)
+    return _player_grid_scores(conn, ascending=False, limit=limit, guild_id=guild_id)

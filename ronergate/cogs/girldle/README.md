@@ -23,7 +23,7 @@ and streaks, and exposes lookups via slash commands.
 | `/girldle leaderboard scope:global\|server` | anyone | Top players. Defaults to global. Server scope only counts members who've posted here. |
 | `/girldle stats user:?` | anyone | Per-player rating, solve rate, current and best streak. |
 | `/girldle h2h user1: user2:` | anyone | Head-to-head record over shared puzzles. |
-| `/girldle styles` | anyone | Top snipers (fewest greens before solving) and plodders (most greens). |
+| `/girldle styles` | anyone | Top snipers (fewest greens before solving) and plodders (most greens) in this server. |
 | `/girldle setup channel:` | Manage Server | Configure the channel results are read from. New servers are not approved for the global leaderboard until the bot operator approves them. |
 | `/girldle privacy private:` | Manage Server | Hide this server from the global leaderboard. |
 | `/girldle backfill channel:? limit:? dry_run:?` | Manage Server | Re-scan channel history. `/girldle setup` already backfills on first run, so this is for re-running against a different channel or a `dry_run` audit. |
