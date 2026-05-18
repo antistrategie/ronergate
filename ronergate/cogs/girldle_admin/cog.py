@@ -163,14 +163,14 @@ class GirldleAdminCog(commands.Cog):
         for row in rows:
             name = row["name"] or "_(unknown — bot hasn't seen this guild yet)_"
             if row["approved"] and not row["private"]:
-                marker = "✅"
+                status = "✅ approved"
             elif row["private"]:
-                marker = "🔒"
+                status = "🔒 private"
             else:
-                marker = "⏳"
+                status = "⏳ pending"
                 pending.append((int(row["guild_id"]), row["name"] or row["guild_id"]))
             lines.append(
-                f"{marker} **{name}** · `{row['guild_id']}` · "
+                f"**{name}** · {status} · `{row['guild_id']}` · "
                 f"<#{row['channel_id']}> · {row['posts']} posts · {row['players']} players"
             )
         embed = discord.Embed(
@@ -178,7 +178,6 @@ class GirldleAdminCog(commands.Cog):
             description="\n".join(lines),
             color=discord.Color.blurple(),
         )
-        embed.set_footer(text="✅ approved · ⏳ pending approval · 🔒 private")
         view = _pending_approval_view(pending)
         if view is not None:
             await interaction.response.send_message(embed=embed, view=view)
