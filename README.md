@@ -1,9 +1,16 @@
 # ROnergate
 
-Multi-server Discord bot. Each feature lives in its own cog. Currently:
+Discord bot for the [Antistratégie](https://discord.gg/XcfYGmxvde) server.
+General-purpose, structured as a set of cogs that can be enabled per-process
+via `COGS`. Currently:
 
-- [Girldle](ronergate/cogs/girldle/README.md) — daily puzzle results scraper,
+- [Girldle](ronergate/cogs/girldle/README.md) — daily Girldle scraper,
   Glicko-2 leaderboard, per-server channels, global or per-server view.
+- [Girldle admin](ronergate/cogs/girldle_admin/README.md) — operator-only
+  controls registered guild-restricted to the home server.
+
+The same image also runs as a separate, public **Girldle** bot that other
+servers can invite — see "Two bots from one image" below.
 
 ## Run locally
 
@@ -46,8 +53,8 @@ volumes:
 # .env (see .env.example)
 DISCORD_TOKEN=your-bot-token
 DB_PATH=/app/data/bot.sqlite
-COGS=girldle
-CONTROL_CHANNEL_ID=000000000000000000
+COGS=girldle,girldle_admin
+OWNER_GUILD_ID=your-home-guild-id
 ```
 
 To deploy a new version:
@@ -56,19 +63,28 @@ To deploy a new version:
 docker compose pull && docker compose up -d
 ```
 
-## Running multiple bots from one image
+## Two bots from one image
 
-Add another service with its own token and (optionally) a narrower cog list.
-Both services share the SQLite volume so they share the leaderboard.
+The repo's deploy on `ronergate.exe.xyz` runs two services from the same
+image, sharing one SQLite volume:
+
+- **ROnergate** (this bot, in Antistratégie): loads `girldle` +
+  `girldle_admin`. Admin commands are guild-restricted via `OWNER_GUILD_ID`.
+- **Girldle** (separate Discord application, invitable by other servers):
+  loads only `girldle`. Same code, different token.
 
 ```yaml
 services:
   ronergate:
     image: ghcr.io/antistrategie/ronergate:latest
-    env_file: .env.ronergate
+    env_file: .env.ronergate    # COGS=girldle,girldle_admin · OWNER_GUILD_ID set
     volumes: [ronergate-data:/app/data]
   girldle:
     image: ghcr.io/antistrategie/ronergate:latest
-    env_file: .env.girldle  # different token, COGS=girldle
+    env_file: .env.girldle      # different token · COGS=girldle
     volumes: [ronergate-data:/app/data]
 ```
+
+Sharing the volume means both bots see the same leaderboard data, and
+ROnergate can administer Girldle's view of it via `/girldleadmin` (since
+the admin cog reads/writes the shared DB).
