@@ -18,8 +18,14 @@ def _add_column_if_missing(
     column: str,
     coltype: str,
 ) -> None:
-    cols = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
-    if column in cols:
-        return
-    log.info("adding %s.%s column", table, column)
-    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+    """Race-safe: relies on SQLite's duplicate-column error rather than a TOCTOU check.
+
+    Multiple bot processes share the same SQLite file. A PRAGMA-then-ALTER check
+    isn't atomic across processes, so we just ALTER and catch the duplicate error.
+    """
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+        log.info("added %s.%s column", table, column)
+    except sqlite3.OperationalError as e:
+        if "duplicate column" not in str(e).lower():
+            raise
