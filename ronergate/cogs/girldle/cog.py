@@ -18,7 +18,6 @@ from .parser import GirldleResult, parse
 
 LEADERBOARD_LIMIT = 25
 NAME_DISPLAY_WIDTH = 18
-PROVISIONAL_RD = 150
 
 log = logging.getLogger(__name__)
 
@@ -244,16 +243,13 @@ class GirldleCog(commands.Cog):
 
         today = date.today()
         lines: list[str] = []
-        any_provisional = False
         for i, row in enumerate(rows, start=1):
             rank = _rank_prefix(i)
             name = _truncate(row["display_name"] or row["user_id"], NAME_DISPLAY_WIDTH)
             last = _format_last_played(row["last_played"], today)
             games = row["games_played"]
             games_label = f"{games} game{'s' if games != 1 else ''}"
-            provisional = row["rd"] > PROVISIONAL_RD
-            any_provisional = any_provisional or provisional
-            rating_label = f"**{int(row['rating'])}**{'?' if provisional else ''}"
+            rating_label = f"**{int(row['rating'])}** ±{int(row['rd'])}"
             guild_suffix = ""
             if scope == "global":
                 guild_name = _guild_name_from_db(self.db, row["primary_guild_id"])
@@ -275,10 +271,9 @@ class GirldleCog(commands.Cog):
             description=description,
             color=discord.Color.gold(),
         )
-        footer = f"{total} players · ranked by conservative rating (rating minus 3 × RD)"
-        if any_provisional:
-            footer += " · ? = provisional (few games or inactive)"
-        embed.set_footer(text=footer)
+        embed.set_footer(
+            text=f"{total} players · ranked by rating minus 3 × RD"
+        )
         await interaction.response.send_message(embed=embed)
 
     @girldle.command(name="stats", description="Per-player stats.")
@@ -306,7 +301,8 @@ class GirldleCog(commands.Cog):
             SELECT
                 COUNT(*) AS total,
                 SUM(CASE WHEN score IS NULL THEN 1 ELSE 0 END) AS fails,
-                AVG(score) AS avg_score
+                AVG(score) AS avg_score,
+                MIN(puzzle_date) AS first_played
             FROM girldle_results WHERE user_id = ?
             """,
             (str(target.id),),
@@ -314,6 +310,9 @@ class GirldleCog(commands.Cog):
         total = agg["total"]
         fails = agg["fails"]
         avg_score = agg["avg_score"]
+        first_played = date.fromisoformat(agg["first_played"])
+        days_since_first = (date.today() - first_played).days + 1
+        days_played_pct = total / days_since_first
         current_streak = _current_streak(self.db, str(target.id))
         best_streak = _best_streak(self.db, str(target.id))
         rank_global, total_global = _leaderboard_rank(self.db, str(target.id))
@@ -321,6 +320,7 @@ class GirldleCog(commands.Cog):
         rank_server, total_server = _leaderboard_rank(
             self.db, str(target.id), guild_id=str(interaction.guild.id)
         )
+        green_density = analysis.player_green_density(self.db.conn, str(target.id))
 
         name = player["display_name"] or target.display_name
         rank_parts: list[str] = []
@@ -334,18 +334,17 @@ class GirldleCog(commands.Cog):
             description=f"**{name}**\n{rank_line}",
             color=discord.Color.gold(),
         )
+        # Row 1 — identity
         embed.add_field(
             name="Rating",
-            value=f"{int(player['rating'])} (RD {int(player['rd'])})",
-            inline=True,
-        )
-        ranking_score = int(player["rating"] - 3 * player["rd"])
-        embed.add_field(
-            name="Ranking score",
-            value=str(ranking_score),
+            value=f"{int(player['rating'])} ±{int(player['rd'])}",
             inline=True,
         )
         embed.add_field(name="Games", value=str(total), inline=True)
+        embed.add_field(
+            name="Playing since", value=first_played.isoformat(), inline=True
+        )
+        # Row 2 — performance
         embed.add_field(
             name="Solve rate",
             value=f"{(total - fails) / total:.0%} ({fails} fail{'s' if fails != 1 else ''})",
@@ -357,16 +356,22 @@ class GirldleCog(commands.Cog):
             inline=True,
         )
         embed.add_field(
+            name="Style",
+            value=f"{int(round(green_density * 100))}% green"
+            if green_density is not None
+            else "n/a",
+            inline=True,
+        )
+        # Row 3 — engagement
+        embed.add_field(
             name="Current streak", value=_format_streak(current_streak), inline=True
         )
         embed.add_field(name="Best streak", value=_format_streak(best_streak), inline=True)
-        green_density = analysis.player_green_density(self.db.conn, str(target.id))
-        if green_density is not None:
-            embed.add_field(
-                name="Style",
-                value=f"{int(round(green_density * 100))}% green",
-                inline=True,
-            )
+        embed.add_field(
+            name="Days played",
+            value=f"{days_played_pct:.0%} ({total}/{days_since_first})",
+            inline=True,
+        )
         embed.set_footer(text=f"Last played {player['last_played']}")
         if isinstance(target, discord.abc.User) and target.display_avatar:
             embed.set_thumbnail(url=target.display_avatar.url)
