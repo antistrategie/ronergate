@@ -125,22 +125,13 @@ async def _report_divergence(
     result: GirldleResult,
     canonical_score: int | None,
 ) -> None:
+    del bot  # kept for callsite stability if we ever want active reporting back
     detail = (
         f"score divergence for <@{message.author.id}> on {result.puzzle_date.isoformat()}: "
         f"canonical={_format_score(canonical_score)}, "
         f"new={_format_score(result.score)} in {message.jump_url}"
     )
     log.warning(detail)
-    channel_id = bot.config.control_channel_id  # type: ignore[attr-defined]
-    if channel_id is None:
-        return
-    channel = bot.get_channel(channel_id)
-    if channel is None:
-        return
-    try:
-        await channel.send(f"⚠️ {detail}")
-    except discord.HTTPException as e:
-        log.warning("failed to post divergence notice: %s", e)
 
 
 def _format_score(score: int | None) -> str:

@@ -13,7 +13,6 @@ class Config:
     discord_token: str
     db_path: str
     cogs: tuple[str, ...]
-    control_channel_id: int | None
     owner_guild_id: int | None
 
 
@@ -32,7 +31,6 @@ def load() -> Config:
         discord_token=token,
         db_path=db_path,
         cogs=cogs,
-        control_channel_id=_optional_int("CONTROL_CHANNEL_ID"),
         owner_guild_id=_optional_int("OWNER_GUILD_ID"),
     )
 

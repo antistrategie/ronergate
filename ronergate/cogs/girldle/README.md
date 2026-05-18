@@ -61,5 +61,5 @@ If a user posts the same puzzle in two servers:
 - The canonical row in `girldle_results` is whichever post arrived first.
 - Their **rating** uses the canonical score (first-write-wins).
 - They appear on **both** servers' `scope=server` leaderboards.
-- If the second post has a different score from the first, a warning is sent
-  to the configured `CONTROL_CHANNEL_ID`.
+- If the second post has a different score from the first, a warning is
+  written to the bot's log (`docker logs <container>`) for operator review.
