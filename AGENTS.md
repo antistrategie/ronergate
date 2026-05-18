@@ -4,9 +4,13 @@ Guidance for coding agents working on this repo.
 
 ## What this is
 
-A multi-server Discord bot, structured as a general-purpose bot with each
-feature in its own
+General-purpose Discord bot for the Antistratégie server, with each feature
+in its own
 [cog](https://discordpy.readthedocs.io/en/stable/ext/commands/cogs.html).
+
+The same image is also deployed as a separate `Girldle`-branded public bot
+(different token, different application) that other servers can invite. See
+"Where it runs" below.
 
 Current features:
 
