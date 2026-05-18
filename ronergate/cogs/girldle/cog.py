@@ -331,7 +331,7 @@ class GirldleCog(commands.Cog):
         rank_line = " · ".join(rank_parts) if rank_parts else "unranked"
         embed = discord.Embed(
             title="Girldle stats",
-            description=f"**{name}** · {rank_line}",
+            description=f"**{name}**\n{rank_line}",
             color=discord.Color.gold(),
         )
         embed.add_field(
