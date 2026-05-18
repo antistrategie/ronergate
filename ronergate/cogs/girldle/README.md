@@ -8,13 +8,13 @@ and streaks, and exposes lookups via slash commands.
 
 1. Invite the Girldle bot:
    https://discord.com/oauth2/authorize?client_id=1505855018962780240&permissions=68608&integration_type=0&scope=bot+applications.commands
-2. As a user with `Manage Server`, run `/girldle setup #your-channel`.
+2. As a user with `Manage Server`, run `/girldle setup #your-channel`. This
+   also ingests any existing share grids in the channel as a one-shot backfill.
 3. Wait for the bot operator to approve your server (see "Server approval"
    below). Until then your players can use the bot but won't appear on the
    global leaderboard.
 4. Optional: `/girldle privacy private:true` to keep this server's results off
    the global leaderboard even after approval.
-5. Optional: `/girldle backfill` to ingest existing share grids in the channel.
 
 ## Commands
 
@@ -26,7 +26,7 @@ and streaks, and exposes lookups via slash commands.
 | `/girldle styles` | anyone | Top snipers (fewest greens before solving) and plodders (most greens). |
 | `/girldle setup channel:` | Manage Server | Configure the channel results are read from. New servers are not approved for the global leaderboard until the bot operator approves them. |
 | `/girldle privacy private:` | Manage Server | Hide this server from the global leaderboard. |
-| `/girldle backfill channel:? limit:? dry_run:?` | Manage Server | Read channel history and ingest historical results. |
+| `/girldle backfill channel:? limit:? dry_run:?` | Manage Server | Re-scan channel history. `/girldle setup` already backfills on first run, so this is for re-running against a different channel or a `dry_run` audit. |
 | `/girldle reset confirm:` | Manage Server | Wipe this server's posts. Canonical results survive if seen elsewhere. |
 
 The bot owner has additional commands under a separate `/girldleadmin`
@@ -37,13 +37,8 @@ group, registered only on the operator's home guild — see the
 
 When a new server runs `/girldle setup`, it's flagged as pending. Pending
 servers can still play and use `scope=server` leaderboards; they just don't
-appear on the global view until approved. The bot owner's own setups are
-auto-approved.
-
-To approve: run `/girldleadmin servers` (on the operator's home guild) —
-pending entries are marked ⏳ and the embed has an **Approve** button per
-pending guild for one-click promotion. No notifications are pushed; you
-check when you want to.
+appear on the global view until approved. Contact the bot operator at
+https://discord.gg/XcfYGmxvde to request approval.
 
 ## Data model
 
