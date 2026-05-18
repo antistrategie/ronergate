@@ -40,15 +40,6 @@ servers can still play and use `scope=server` leaderboards; they just don't
 appear on the global view until approved. Contact the bot operator at
 https://discord.gg/XcfYGmxvde to request approval.
 
-## Data model
-
-- `girldle_results` — canonical first-seen result per (user, puzzle_date). Used
-  by the Glicko-2 rating math.
-- `girldle_posts` — every Discord message we saw, with its guild. Used by
-  scope=server leaderboards, primary-guild lookup, and audit.
-- `girldle_players` — cached per-user rating, streak, and games played.
-- `girldle_config` — per-guild settings: girldle channel and privacy flag.
-
 Ratings are **global**: a user's skill rating reflects all their games across
 every server. The leaderboard view can be filtered by scope and by privacy
 flag, but the rating itself doesn't fork.
