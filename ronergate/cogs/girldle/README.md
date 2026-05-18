@@ -27,10 +27,10 @@ and streaks, and exposes lookups via slash commands.
 | `/girldle setup channel:` | Manage Server | Configure the channel results are read from. New servers are not approved for the global leaderboard until the bot operator approves them. |
 | `/girldle privacy private:` | Manage Server | Hide this server from the global leaderboard. |
 | `/girldle backfill channel:? limit:? dry_run:?` | Manage Server | Re-scan channel history. `/girldle setup` already backfills on first run, so this is for re-running against a different channel or a `dry_run` audit. |
-| `/girldle reset confirm:` | Manage Server | Wipe this server's posts. Canonical results survive if seen elsewhere. |
+| `/girldle reset confirm:` | Manage Server | Wipe this server's posts. Doesn't touch posts the user made in other servers. |
 
 The bot owner has additional commands under a separate `/girldleadmin`
-group, registered only on the operator's home guild — see the
+group, registered only on the operator's home guild. See the
 [`girldle_admin` cog](../girldle_admin/README.md).
 
 ## Server approval
@@ -40,17 +40,18 @@ servers can still play and use `scope=server` leaderboards; they just don't
 appear on the global view until approved. Contact the bot operator at
 https://discord.gg/XcfYGmxvde to request approval.
 
-Ratings are **global**: a user's skill rating reflects all their games across
-every server. The leaderboard view can be filtered by scope and by privacy
-flag, but the rating itself doesn't fork.
-
 ## Cross-server posting
+
+Ratings are **global**: a user's skill rating reflects all their games across
+every server, regardless of which server they posted in. The leaderboard view
+can be filtered by scope and by privacy flag, but the rating itself doesn't
+fork.
 
 If a user posts the same puzzle in two servers:
 
-- Both posts are recorded in `girldle_posts`.
-- The canonical row in `girldle_results` is whichever post arrived first.
-- Their **rating** uses the canonical score (first-write-wins).
-- They appear on **both** servers' `scope=server` leaderboards.
+- Both sightings are recorded. The user appears on **both** servers'
+  `scope=server` leaderboards.
+- The first-posted score is what feeds into the rating. The second is
+  recorded but doesn't double-count.
 - If the second post has a different score from the first, a warning is
   written to the bot's log (`docker logs <container>`) for operator review.
