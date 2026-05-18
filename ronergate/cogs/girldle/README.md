@@ -21,10 +21,22 @@ and streaks, and exposes lookups via slash commands.
 | `/girldle stats user:?` | anyone | Per-player rating, solve rate, current and best streak. |
 | `/girldle h2h user1: user2:` | anyone | Head-to-head record over shared puzzles. |
 | `/girldle styles` | anyone | Top snipers (fewest greens before solving) and plodders (most greens). |
-| `/girldle setup channel:` | Manage Server | Configure the channel results are read from. |
+| `/girldle setup channel:` | Manage Server | Configure the channel results are read from. New servers are not approved for the global leaderboard until the bot operator approves them. |
 | `/girldle privacy private:` | Manage Server | Hide this server from the global leaderboard. |
 | `/girldle backfill channel:? limit:? dry_run:?` | Manage Server | Read channel history and ingest historical results. |
 | `/girldle reset confirm:` | Manage Server | Wipe this server's posts. Canonical results survive if seen elsewhere. |
+| `/girldle approve guild_id: approved:?` | Bot owner | Approve or revoke a server's global-leaderboard visibility. |
+| `/girldle servers` | Bot owner | List all known servers, their channel, approval state, and post count. |
+| `/girldle remove guild_id:` | Bot owner | Drop a server's config and all its posts. Orphaned canonical results are also removed. |
+
+## Server approval
+
+When a new server runs `/girldle setup`, it's flagged as pending until the bot
+operator approves it. The operator receives a notification in
+`CONTROL_CHANNEL_ID` with **Approve** / **Deny** buttons (one click). Pending
+servers can still play and use `scope=server` leaderboards; they just don't
+appear on the global view until approved. The bot owner's own setups are
+auto-approved.
 
 ## Data model
 

@@ -161,36 +161,64 @@ def test_reset_drops_posts_then_orphan_results(db: Database):
     assert remaining_results == {"u2", "u3"}  # u1 dropped, u3 survives via B
 
 
-def test_global_leaderboard_excludes_private_guilds(db: Database):
-    # u1 only posts in guild B (private). Should be invisible globally.
-    # u2 posts in guild A (public). Should be visible.
+def _public_global_query() -> str:
+    """The SELECT clause the cog uses for scope=global (approved AND not private)."""
+    return """
+        SELECT p.user_id FROM girldle_players p
+        WHERE p.games_played >= 1
+          AND EXISTS (
+              SELECT 1 FROM girldle_posts po
+              WHERE po.user_id = p.user_id
+                AND po.guild_id IN (
+                    SELECT guild_id FROM girldle_config
+                    WHERE approved = 1 AND private = 0
+                )
+          )
+    """
+
+
+def test_global_excludes_private_guilds(db: Database):
     _seed(db, message_id="m1", guild_id="A", user_id="u2", puzzle_date="2026-05-10")
     _seed(db, message_id="m2", guild_id="B", user_id="u1", puzzle_date="2026-05-10")
     db.conn.execute(
-        "INSERT INTO girldle_config (guild_id, channel_id, private) VALUES (?, ?, 1)",
+        "INSERT INTO girldle_config (guild_id, channel_id, approved, private) "
+        "VALUES (?, ?, 1, 1)",
         ("B", "ch-b"),
     )
     db.conn.execute(
-        "INSERT INTO girldle_config (guild_id, channel_id) VALUES (?, ?)", ("A", "ch-a")
+        "INSERT INTO girldle_config (guild_id, channel_id, approved) VALUES (?, ?, 1)",
+        ("A", "ch-a"),
     )
 
-    visible = {
-        row["user_id"]
-        for row in db.conn.execute(
-            """
-            SELECT p.user_id FROM girldle_players p
-            WHERE p.games_played >= 1
-              AND EXISTS (
-                  SELECT 1 FROM girldle_posts po
-                  WHERE po.user_id = p.user_id
-                    AND po.guild_id NOT IN (
-                        SELECT guild_id FROM girldle_config WHERE private = 1
-                    )
-              )
-            """
-        )
-    }
+    visible = {row["user_id"] for row in db.conn.execute(_public_global_query())}
     assert visible == {"u2"}
+
+
+def test_global_excludes_unapproved_guilds(db: Database):
+    # Both public, but only A is approved
+    _seed(db, message_id="m1", guild_id="A", user_id="u_app", puzzle_date="2026-05-10")
+    _seed(db, message_id="m2", guild_id="B", user_id="u_pending", puzzle_date="2026-05-10")
+    db.conn.execute(
+        "INSERT INTO girldle_config (guild_id, channel_id, approved) VALUES (?, ?, 1)",
+        ("A", "ch-a"),
+    )
+    db.conn.execute(
+        "INSERT INTO girldle_config (guild_id, channel_id, approved) VALUES (?, ?, 0)",
+        ("B", "ch-b"),
+    )
+
+    visible = {row["user_id"] for row in db.conn.execute(_public_global_query())}
+    assert visible == {"u_app"}
+
+
+def test_approved_default_is_zero(db: Database):
+    db.conn.execute(
+        "INSERT INTO girldle_config (guild_id, channel_id) VALUES (?, ?)", ("X", "c")
+    )
+    row = db.conn.execute(
+        "SELECT approved FROM girldle_config WHERE guild_id = ?", ("X",)
+    ).fetchone()
+    assert row["approved"] == 0
 
 
 def test_primary_guild_is_most_posted_in(db: Database):

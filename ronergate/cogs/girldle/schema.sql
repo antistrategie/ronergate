@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS girldle_players (
 CREATE TABLE IF NOT EXISTS girldle_config (
     guild_id   TEXT PRIMARY KEY,
     channel_id TEXT NOT NULL,
-    private    INTEGER NOT NULL DEFAULT 0
+    private    INTEGER NOT NULL DEFAULT 0,
+    approved   INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS girldle_posts (

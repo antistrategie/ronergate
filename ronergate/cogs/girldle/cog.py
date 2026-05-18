@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, timedelta
 from typing import Literal
 
@@ -25,6 +26,61 @@ log = logging.getLogger(__name__)
 RESET_CONFIRM_PHRASE = "wipe-girldle"
 
 
+class _ApprovalButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"girldle_(?P<action>approve|deny):(?P<guild_id>\d+)",
+):
+    """Approve/deny button on the new-server notification. Persistent across bot restarts."""
+
+    def __init__(self, action: str, guild_id: int):
+        super().__init__(
+            discord.ui.Button(
+                label=action.capitalize(),
+                style=(
+                    discord.ButtonStyle.success
+                    if action == "approve"
+                    else discord.ButtonStyle.danger
+                ),
+                custom_id=f"girldle_{action}:{guild_id}",
+            )
+        )
+        self.action = action
+        self.guild_id = guild_id
+
+    @classmethod
+    async def from_custom_id(
+        cls,
+        interaction: discord.Interaction,
+        item: discord.ui.Button,
+        match: re.Match[str],
+    ) -> _ApprovalButton:
+        return cls(match["action"], int(match["guild_id"]))
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if not await interaction.client.is_owner(interaction.user):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        db: Database = interaction.client.db  # type: ignore[attr-defined]
+        new_value = 1 if self.action == "approve" else 0
+        with db.transaction() as conn:
+            conn.execute(
+                "UPDATE girldle_config SET approved = ? WHERE guild_id = ?",
+                (new_value, str(self.guild_id)),
+            )
+        verb = "✅ Approved" if self.action == "approve" else "❌ Denied"
+        await interaction.response.edit_message(
+            content=f"{verb} guild `{self.guild_id}`.",
+            view=None,
+        )
+
+
+def _approval_view(guild_id: int) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    view.add_item(_ApprovalButton("approve", guild_id))
+    view.add_item(_ApprovalButton("deny", guild_id))
+    return view
+
+
 def _girldle_channel_for(db: Database, guild_id: int) -> int | None:
     row = db.conn.execute(
         "SELECT channel_id FROM girldle_config WHERE guild_id = ?",
@@ -43,6 +99,9 @@ class GirldleCog(commands.Cog):
         self.bot = bot
         self.config: Config = bot.config  # type: ignore[attr-defined]
         self.db: Database = bot.db  # type: ignore[attr-defined]
+
+    async def cog_load(self) -> None:
+        self.bot.add_dynamic_items(_ApprovalButton)
 
     def _guild_name(self, guild_id: str | None) -> str | None:
         if not guild_id:
@@ -158,8 +217,9 @@ class GirldleCog(commands.Cog):
                            (
                                SELECT guild_id FROM girldle_posts
                                WHERE user_id = p.user_id
-                                 AND guild_id NOT IN (
-                                     SELECT guild_id FROM girldle_config WHERE private = 1
+                                 AND guild_id IN (
+                                     SELECT guild_id FROM girldle_config
+                                     WHERE approved = 1 AND private = 0
                                  )
                                GROUP BY guild_id
                                ORDER BY COUNT(*) DESC
@@ -170,8 +230,9 @@ class GirldleCog(commands.Cog):
                       AND EXISTS (
                           SELECT 1 FROM girldle_posts po
                           WHERE po.user_id = p.user_id
-                            AND po.guild_id NOT IN (
-                                SELECT guild_id FROM girldle_config WHERE private = 1
+                            AND po.guild_id IN (
+                                SELECT guild_id FROM girldle_config
+                                WHERE approved = 1 AND private = 0
                             )
                       )
                     ORDER BY (p.rating - 3 * p.rd) DESC
@@ -389,17 +450,64 @@ class GirldleCog(commands.Cog):
         if interaction.guild is None:
             await interaction.response.send_message("Run this in the server, not in DMs.")
             return
+        guild = interaction.guild
+        is_owner = await self.bot.is_owner(interaction.user)
+
         with self.db.transaction() as conn:
-            conn.execute(
-                """
-                INSERT INTO girldle_config (guild_id, channel_id) VALUES (?, ?)
-                ON CONFLICT(guild_id) DO UPDATE SET channel_id = excluded.channel_id
-                """,
-                (str(interaction.guild.id), str(channel.id)),
+            existing = conn.execute(
+                "SELECT approved FROM girldle_config WHERE guild_id = ?",
+                (str(guild.id),),
+            ).fetchone()
+            is_new = existing is None
+            # Owner sets up → auto-approve. Otherwise approved stays as it was
+            # (0 for new, unchanged for re-setup).
+            if is_new:
+                approved = 1 if is_owner else 0
+                conn.execute(
+                    "INSERT INTO girldle_config (guild_id, channel_id, approved) "
+                    "VALUES (?, ?, ?)",
+                    (str(guild.id), str(channel.id), approved),
+                )
+            else:
+                conn.execute(
+                    "UPDATE girldle_config SET channel_id = ? WHERE guild_id = ?",
+                    (str(channel.id), str(guild.id)),
+                )
+
+        msg = f"Girldle channel set to {channel.mention}. Results posted there will be ingested."
+        if is_new and not is_owner:
+            msg += (
+                "\nThis server is not yet approved for the global leaderboard. "
+                "The bot operator has been notified."
             )
-        await interaction.response.send_message(
-            f"Girldle channel set to {channel.mention}. Results posted there will be ingested."
+        await interaction.response.send_message(msg)
+
+        if is_new and not is_owner:
+            await self._notify_pending_approval(guild, channel)
+
+    async def _notify_pending_approval(
+        self, guild: discord.Guild, channel: discord.TextChannel
+    ) -> None:
+        channel_id = self.config.control_channel_id
+        if channel_id is None:
+            log.warning(
+                "guild %s set up Girldle but CONTROL_CHANNEL_ID is unset; "
+                "no notification sent",
+                guild.id,
+            )
+            return
+        control = self.bot.get_channel(channel_id)
+        if not isinstance(control, discord.abc.Messageable):
+            log.warning("control channel %s not found in cache", channel_id)
+            return
+        body = (
+            f"🆕 New Girldle server: **{guild.name}** "
+            f"(`{guild.id}`, {guild.member_count} members, channel <#{channel.id}>)."
         )
+        try:
+            await control.send(body, view=_approval_view(guild.id))
+        except discord.HTTPException as e:
+            log.warning("failed to post approval notice for %s: %s", guild.id, e)
 
     @girldle.command(name="backfill", description="Read channel history and ingest results.")
     @app_commands.default_permissions(manage_guild=True)
@@ -524,6 +632,128 @@ class GirldleCog(commands.Cog):
         state = "hidden from" if private else "visible on"
         await interaction.response.send_message(
             f"This server's results are now {state} the global leaderboard."
+        )
+
+    @girldle.command(
+        name="approve",
+        description="(Owner) Approve a server for the global leaderboard, or revoke approval.",
+    )
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(
+        guild_id="Numeric guild ID",
+        approved="true = visible globally, false = revoke approval",
+    )
+    async def approve_cmd(
+        self,
+        interaction: discord.Interaction,
+        guild_id: str,
+        approved: bool = True,
+    ) -> None:
+        if not await self.bot.is_owner(interaction.user):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        try:
+            gid = int(guild_id)
+        except ValueError:
+            await interaction.response.send_message("`guild_id` must be a number.")
+            return
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE girldle_config SET approved = ? WHERE guild_id = ?",
+                (1 if approved else 0, str(gid)),
+            )
+            if cursor.rowcount == 0:
+                await interaction.response.send_message(
+                    f"No config row for guild `{gid}`. They need to run `/girldle setup` first."
+                )
+                return
+        verb = "approved" if approved else "revoked"
+        await interaction.response.send_message(f"Guild `{gid}` {verb}.")
+
+    @girldle.command(
+        name="servers",
+        description="(Owner) List all servers known to the bot and their state.",
+    )
+    @app_commands.default_permissions(administrator=True)
+    async def servers_cmd(self, interaction: discord.Interaction) -> None:
+        if not await self.bot.is_owner(interaction.user):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        rows = list(
+            self.db.conn.execute(
+                """
+                SELECT c.guild_id, c.channel_id, c.approved, c.private,
+                       (SELECT COUNT(*) FROM girldle_posts WHERE guild_id = c.guild_id) AS posts,
+                       (SELECT COUNT(DISTINCT user_id) FROM girldle_posts
+                        WHERE guild_id = c.guild_id) AS players
+                FROM girldle_config c
+                ORDER BY posts DESC, c.guild_id ASC
+                """
+            )
+        )
+        if not rows:
+            await interaction.response.send_message("No servers configured.")
+            return
+        lines: list[str] = []
+        for row in rows:
+            name = self._guild_name(row["guild_id"]) or "_(bot not in guild)_"
+            if row["approved"] and not row["private"]:
+                marker = "✅"
+            elif row["private"]:
+                marker = "🔒"
+            else:
+                marker = "⏳"
+            lines.append(
+                f"{marker} **{name}** · `{row['guild_id']}` · "
+                f"<#{row['channel_id']}> · {row['posts']} posts · {row['players']} players"
+            )
+        embed = discord.Embed(
+            title=f"Girldle servers ({len(rows)})",
+            description="\n".join(lines),
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text="✅ approved · ⏳ pending approval · 🔒 private")
+        await interaction.response.send_message(embed=embed)
+
+    @girldle.command(
+        name="remove",
+        description="(Owner) Remove a server's config and wipe its posts.",
+    )
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(guild_id="Numeric guild ID to remove")
+    async def remove_cmd(self, interaction: discord.Interaction, guild_id: str) -> None:
+        if not await self.bot.is_owner(interaction.user):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        try:
+            gid = int(guild_id)
+        except ValueError:
+            await interaction.response.send_message("`guild_id` must be a number.")
+            return
+        with self.db.transaction() as conn:
+            config_cursor = conn.execute(
+                "DELETE FROM girldle_config WHERE guild_id = ?", (str(gid),)
+            )
+            post_cursor = conn.execute(
+                "DELETE FROM girldle_posts WHERE guild_id = ?", (str(gid),)
+            )
+            result_cursor = conn.execute(
+                """
+                DELETE FROM girldle_results
+                WHERE (user_id, puzzle_date) NOT IN (
+                    SELECT user_id, puzzle_date FROM girldle_posts
+                )
+                """
+            )
+        if config_cursor.rowcount == 0 and post_cursor.rowcount == 0:
+            await interaction.response.send_message(f"No data for guild `{gid}`.")
+            return
+        ingest.recompute_ratings(self.db)
+        await interaction.response.send_message(
+            f"Removed guild `{gid}`: dropped config, "
+            f"{post_cursor.rowcount} post{'s' if post_cursor.rowcount != 1 else ''}, "
+            f"{result_cursor.rowcount} orphan canonical "
+            f"result{'s' if result_cursor.rowcount != 1 else ''}."
         )
 
 
