@@ -316,10 +316,19 @@ class GirldleCog(commands.Cog):
         avg_score = agg["avg_score"]
         current_streak = _current_streak(self.db, str(target.id))
         best_streak = _best_streak(self.db, str(target.id))
-        rank, total_ranked = _leaderboard_rank(self.db, str(target.id))
+        rank_global, total_global = _leaderboard_rank(self.db, str(target.id))
+        assert interaction.guild is not None
+        rank_server, total_server = _leaderboard_rank(
+            self.db, str(target.id), guild_id=str(interaction.guild.id)
+        )
 
         name = player["display_name"] or target.display_name
-        rank_line = f"{_rank_prefix(rank)} of {total_ranked}" if rank else "unranked"
+        rank_parts: list[str] = []
+        if rank_global:
+            rank_parts.append(f"{_rank_prefix(rank_global)} of {total_global} global")
+        if rank_server:
+            rank_parts.append(f"{_rank_prefix(rank_server)} of {total_server} here")
+        rank_line = " · ".join(rank_parts) if rank_parts else "unranked"
         embed = discord.Embed(
             title="Girldle stats",
             description=f"**{name}** · {rank_line}",
@@ -654,22 +663,53 @@ def _format_streak(days: int) -> str:
     return f"{days} day{'s' if days != 1 else ''}"
 
 
-def _leaderboard_rank(db: Database, user_id: str) -> tuple[int | None, int]:
-    """Return (rank, total_ranked_players). rank is None if user isn't in the ranking."""
+def _leaderboard_rank(
+    db: Database, user_id: str, *, guild_id: str | None = None
+) -> tuple[int | None, int]:
+    """Return (rank, total_ranked_players).
+
+    rank is None if the user isn't in the ranking. If guild_id is given, the
+    ranking is scoped to players who've posted in that guild; otherwise global.
+    """
+    if guild_id is None:
+        total = db.conn.execute(
+            "SELECT COUNT(*) AS n FROM girldle_players WHERE games_played >= 1"
+        ).fetchone()["n"]
+        row = db.conn.execute(
+            """
+            SELECT (
+                SELECT COUNT(*) FROM girldle_players p2
+                WHERE p2.games_played >= 1
+                  AND (p2.rating - 3 * p2.rd) > (p1.rating - 3 * p1.rd)
+            ) + 1 AS rank
+            FROM girldle_players p1
+            WHERE p1.user_id = ? AND p1.games_played >= 1
+            """,
+            (user_id,),
+        ).fetchone()
+        return (row["rank"] if row else None, total)
+
     total = db.conn.execute(
-        "SELECT COUNT(*) AS n FROM girldle_players WHERE games_played >= 1"
+        """
+        SELECT COUNT(*) AS n FROM girldle_players p
+        WHERE p.games_played >= 1
+          AND p.user_id IN (SELECT user_id FROM girldle_posts WHERE guild_id = ?)
+        """,
+        (guild_id,),
     ).fetchone()["n"]
     row = db.conn.execute(
         """
         SELECT (
             SELECT COUNT(*) FROM girldle_players p2
             WHERE p2.games_played >= 1
+              AND p2.user_id IN (SELECT user_id FROM girldle_posts WHERE guild_id = ?)
               AND (p2.rating - 3 * p2.rd) > (p1.rating - 3 * p1.rd)
         ) + 1 AS rank
         FROM girldle_players p1
         WHERE p1.user_id = ? AND p1.games_played >= 1
+          AND p1.user_id IN (SELECT user_id FROM girldle_posts WHERE guild_id = ?)
         """,
-        (user_id,),
+        (guild_id, user_id, guild_id),
     ).fetchone()
     return (row["rank"] if row else None, total)
 
