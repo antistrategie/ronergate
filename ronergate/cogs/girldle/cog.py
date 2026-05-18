@@ -16,7 +16,7 @@ from ...db import Database
 from . import analysis, ingest
 from .parser import GirldleResult, parse
 
-LEADERBOARD_LIMIT = 100
+LEADERBOARD_LIMIT = 25
 NAME_DISPLAY_WIDTH = 18
 PROVISIONAL_RD = 150
 
@@ -161,6 +161,7 @@ class GirldleCog(commands.Cog):
             if interaction.guild is None:
                 await interaction.response.send_message("Server scope only works in a server.")
                 return
+            guild_id = str(interaction.guild.id)
             rows = list(
                 self.db.conn.execute(
                     """
@@ -174,9 +175,19 @@ class GirldleCog(commands.Cog):
                     ORDER BY (p.rating - 3 * p.rd) DESC
                     LIMIT ?
                     """,
-                    (str(interaction.guild.id), LEADERBOARD_LIMIT),
+                    (guild_id, LEADERBOARD_LIMIT),
                 )
             )
+            total = self.db.conn.execute(
+                """
+                SELECT COUNT(*) AS n FROM girldle_players p
+                WHERE p.games_played >= 1
+                  AND p.user_id IN (
+                      SELECT user_id FROM girldle_posts WHERE guild_id = ?
+                  )
+                """,
+                (guild_id,),
+            ).fetchone()["n"]
             scope_label = f"this server ({interaction.guild.name})"
         else:
             rows = list(
@@ -211,6 +222,20 @@ class GirldleCog(commands.Cog):
                     (LEADERBOARD_LIMIT,),
                 )
             )
+            total = self.db.conn.execute(
+                """
+                SELECT COUNT(*) AS n FROM girldle_players p
+                WHERE p.games_played >= 1
+                  AND EXISTS (
+                      SELECT 1 FROM girldle_posts po
+                      WHERE po.user_id = p.user_id
+                        AND po.guild_id IN (
+                            SELECT guild_id FROM girldle_config
+                            WHERE approved = 1 AND private = 0
+                        )
+                  )
+                """
+            ).fetchone()["n"]
             scope_label = "global"
 
         if not rows:
@@ -240,14 +265,17 @@ class GirldleCog(commands.Cog):
             )
             lines.append(line)
         description = "\n".join(lines)
-        if len(description) > 4000:
-            description = description[:4000].rsplit("\n", 1)[0] + "\n…"
+        if total > LEADERBOARD_LIMIT:
+            description += (
+                f"\n\nNot in the top {LEADERBOARD_LIMIT}? "
+                "Run `/girldle stats` to see your rank."
+            )
         embed = discord.Embed(
-            title=f"Girldle leaderboard · {scope_label}",
+            title=f"Girldle leaderboard · top {LEADERBOARD_LIMIT} · {scope_label}",
             description=description,
             color=discord.Color.gold(),
         )
-        footer = f"{len(rows)} players · ranked by conservative rating (rating minus 3 × RD)"
+        footer = f"{total} players · ranked by conservative rating (rating minus 3 × RD)"
         if any_provisional:
             footer += " · ? = provisional (few games or inactive)"
         embed.set_footer(text=footer)
