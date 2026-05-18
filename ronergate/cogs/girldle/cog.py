@@ -461,8 +461,8 @@ class GirldleCog(commands.Cog):
         )
         if not is_owner:
             msg += (
-                "\nThis server is not yet approved for the global leaderboard. "
-                "The bot operator will see this in `/girldle servers`."
+                "\nThis server isn't yet approved for the global leaderboard. "
+                "Ask the bot operator (https://discord.gg/XcfYGmxvde) for approval."
             )
         await interaction.followup.send(msg)
 
