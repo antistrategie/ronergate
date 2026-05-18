@@ -16,10 +16,6 @@ from .db import Database
 
 log = logging.getLogger(__name__)
 
-COGS = [
-    "ronergate.cogs.girldle",
-]
-
 
 class ROnergate(commands.Bot):
     def __init__(self, config: Config, db: Database):
@@ -32,11 +28,9 @@ class ROnergate(commands.Bot):
 
     async def setup_hook(self) -> None:
         self.tree.on_error = self._on_app_command_error  # type: ignore[assignment]
-        for ext in COGS:
+        for ext in self.config.cogs:
             await self.load_extension(ext)
-        guild = discord.Object(id=self.config.guild_id)
-        self.tree.copy_global_to(guild=guild)
-        await self.tree.sync(guild=guild)
+        await self.tree.sync()
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s (id=%s)", self.user, self.user.id if self.user else None)

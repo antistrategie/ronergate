@@ -1,11 +1,12 @@
 services:
   ronergate:
-    build: .
+    image: ghcr.io/antistrategie/ronergate:latest
     container_name: ronergate
     restart: unless-stopped
     env_file: .env
     volumes:
       - ronergate-data:/app/data
+    pull_policy: always
 
 volumes:
   ronergate-data:

@@ -23,3 +23,24 @@ CREATE TABLE IF NOT EXISTS girldle_players (
     games_played  INTEGER DEFAULT 0,
     last_played   TEXT
 );
+
+CREATE TABLE IF NOT EXISTS girldle_config (
+    guild_id   TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL,
+    private    INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS girldle_posts (
+    message_id  TEXT PRIMARY KEY,
+    guild_id    TEXT NOT NULL,
+    user_id     TEXT NOT NULL,
+    puzzle_date TEXT NOT NULL,
+    posted_at   TEXT NOT NULL,
+    score       INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_girldle_posts_guild_id
+    ON girldle_posts(guild_id);
+
+CREATE INDEX IF NOT EXISTS idx_girldle_posts_user_puzzle
+    ON girldle_posts(user_id, puzzle_date);

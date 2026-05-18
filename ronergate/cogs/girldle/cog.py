@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
+from typing import Literal
 
 import discord
 from discord import app_commands
@@ -12,7 +13,6 @@ from discord.ext import commands
 from ... import errors
 from ...config import Config
 from ...db import Database
-from ...permissions import is_admin
 from . import analysis, ingest
 from .parser import parse
 
@@ -23,6 +23,14 @@ PROVISIONAL_RD = 150
 log = logging.getLogger(__name__)
 
 RESET_CONFIRM_PHRASE = "wipe-girldle"
+
+
+def _girldle_channel_for(db: Database, guild_id: int) -> int | None:
+    row = db.conn.execute(
+        "SELECT channel_id FROM girldle_config WHERE guild_id = ?",
+        (str(guild_id),),
+    ).fetchone()
+    return int(row["channel_id"]) if row else None
 
 
 class GirldleCog(commands.Cog):
@@ -36,14 +44,26 @@ class GirldleCog(commands.Cog):
         self.config: Config = bot.config  # type: ignore[attr-defined]
         self.db: Database = bot.db  # type: ignore[attr-defined]
 
+    def _guild_name(self, guild_id: str | None) -> str | None:
+        if not guild_id:
+            return None
+        guild = self.bot.get_guild(int(guild_id))
+        return guild.name if guild else None
+
+    def _is_girldle_channel(self, message: discord.Message) -> bool:
+        if message.guild is None:
+            return False
+        configured = _girldle_channel_for(self.db, message.guild.id)
+        return configured is not None and message.channel.id == configured
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot:
             return
-        if message.channel.id != self.config.girldle_channel_id:
+        if not self._is_girldle_channel(message):
             return
         try:
-            await ingest.handle_message(self.db, message)
+            await ingest.handle_message(self.bot, self.db, message)
         except Exception as e:
             await errors.report(self.bot, f"ingest failed for {message.jump_url}", e)
 
@@ -53,46 +73,117 @@ class GirldleCog(commands.Cog):
     ) -> None:
         if after.author.bot:
             return
-        if after.channel.id != self.config.girldle_channel_id:
+        if not self._is_girldle_channel(after):
             return
         try:
-            with self.db.transaction() as conn:
-                conn.execute(
-                    "DELETE FROM girldle_results WHERE message_id = ?", (str(after.id),)
-                )
-            await ingest.handle_message(self.db, after)
+            self._purge_message(after.id)
+            await ingest.handle_message(self.bot, self.db, after)
         except Exception as e:
             await errors.report(self.bot, f"edit re-ingest failed for {after.jump_url}", e)
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message) -> None:
-        if message.channel.id != self.config.girldle_channel_id:
+        if not self._is_girldle_channel(message):
             return
         try:
-            with self.db.transaction() as conn:
-                conn.execute(
-                    "DELETE FROM girldle_results WHERE message_id = ?", (str(message.id),)
-                )
+            self._purge_message(message.id)
         except Exception as e:
             await errors.report(self.bot, f"delete cleanup failed for {message.id}", e)
 
+    def _purge_message(self, message_id: int) -> None:
+        """Remove a single message from posts + drop the canonical result if no posts remain."""
+        with self.db.transaction() as conn:
+            row = conn.execute(
+                "SELECT user_id, puzzle_date FROM girldle_posts WHERE message_id = ?",
+                (str(message_id),),
+            ).fetchone()
+            conn.execute("DELETE FROM girldle_posts WHERE message_id = ?", (str(message_id),))
+            if row is None:
+                # Pre-posts-table row: also remove from canonical
+                conn.execute(
+                    "DELETE FROM girldle_results WHERE message_id = ?", (str(message_id),)
+                )
+                return
+            still_posted = conn.execute(
+                "SELECT 1 FROM girldle_posts WHERE user_id = ? AND puzzle_date = ? LIMIT 1",
+                (row["user_id"], row["puzzle_date"]),
+            ).fetchone()
+            if still_posted is None:
+                conn.execute(
+                    "DELETE FROM girldle_results WHERE user_id = ? AND puzzle_date = ?",
+                    (row["user_id"], row["puzzle_date"]),
+                )
+
     @girldle.command(name="leaderboard", description="All-time Glicko-2 ratings.")
-    async def leaderboard(self, interaction: discord.Interaction) -> None:
+    @app_commands.describe(
+        scope=(
+            "global = everyone (default), "
+            "server = only members who've played in this server"
+        ),
+    )
+    async def leaderboard(
+        self,
+        interaction: discord.Interaction,
+        scope: Literal["global", "server"] = "global",
+    ) -> None:
         ingest.recompute_ratings(self.db)
-        rows = list(
-            self.db.conn.execute(
-                """
-                SELECT user_id, display_name, rating, rd, games_played, last_played
-                FROM girldle_players
-                WHERE games_played >= 1
-                ORDER BY (rating - 3 * rd) DESC
-                LIMIT ?
-                """,
-                (LEADERBOARD_LIMIT,),
+
+        if scope == "server":
+            if interaction.guild is None:
+                await interaction.response.send_message("Server scope only works in a server.")
+                return
+            rows = list(
+                self.db.conn.execute(
+                    """
+                    SELECT p.user_id, p.display_name, p.rating, p.rd,
+                           p.games_played, p.last_played, NULL AS primary_guild_id
+                    FROM girldle_players p
+                    WHERE p.games_played >= 1
+                      AND p.user_id IN (
+                          SELECT user_id FROM girldle_posts WHERE guild_id = ?
+                      )
+                    ORDER BY (p.rating - 3 * p.rd) DESC
+                    LIMIT ?
+                    """,
+                    (str(interaction.guild.id), LEADERBOARD_LIMIT),
+                )
             )
-        )
+            scope_label = f"this server ({interaction.guild.name})"
+        else:
+            rows = list(
+                self.db.conn.execute(
+                    """
+                    SELECT p.user_id, p.display_name, p.rating, p.rd,
+                           p.games_played, p.last_played,
+                           (
+                               SELECT guild_id FROM girldle_posts
+                               WHERE user_id = p.user_id
+                                 AND guild_id NOT IN (
+                                     SELECT guild_id FROM girldle_config WHERE private = 1
+                                 )
+                               GROUP BY guild_id
+                               ORDER BY COUNT(*) DESC
+                               LIMIT 1
+                           ) AS primary_guild_id
+                    FROM girldle_players p
+                    WHERE p.games_played >= 1
+                      AND EXISTS (
+                          SELECT 1 FROM girldle_posts po
+                          WHERE po.user_id = p.user_id
+                            AND po.guild_id NOT IN (
+                                SELECT guild_id FROM girldle_config WHERE private = 1
+                            )
+                      )
+                    ORDER BY (p.rating - 3 * p.rd) DESC
+                    LIMIT ?
+                    """,
+                    (LEADERBOARD_LIMIT,),
+                )
+            )
+            scope_label = "global"
+
         if not rows:
-            await interaction.response.send_message("No Girldle results yet.")
+            await interaction.response.send_message(f"No Girldle results yet ({scope_label}).")
             return
 
         today = date.today()
@@ -107,14 +198,17 @@ class GirldleCog(commands.Cog):
             provisional = row["rd"] > PROVISIONAL_RD
             any_provisional = any_provisional or provisional
             rating_label = f"{int(row['rating'])}{'?' if provisional else ''}"
-            lines.append(
-                f"{rank} **{name}** · {rating_label} · {games_label} · {last}"
-            )
+            line = f"{rank} **{name}** · {rating_label} · {games_label} · {last}"
+            if scope == "global":
+                guild_name = self._guild_name(row["primary_guild_id"])
+                if guild_name:
+                    line += f" · _{guild_name}_"
+            lines.append(line)
         description = "\n".join(lines)
         if len(description) > 4000:
             description = description[:4000].rsplit("\n", 1)[0] + "\n…"
         embed = discord.Embed(
-            title="Girldle leaderboard",
+            title=f"Girldle leaderboard · {scope_label}",
             description=description,
             color=discord.Color.gold(),
         )
@@ -282,8 +376,34 @@ class GirldleCog(commands.Cog):
         )
         await interaction.response.send_message(embed=embed)
 
+    @girldle.command(
+        name="setup",
+        description="Configure the channel Girldle results are read from.",
+    )
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(channel="Channel where players post their share grids.")
+    async def setup_cmd(
+        self, interaction: discord.Interaction, channel: discord.TextChannel
+    ) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message("Run this in the server, not in DMs.")
+            return
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO girldle_config (guild_id, channel_id) VALUES (?, ?)
+                ON CONFLICT(guild_id) DO UPDATE SET channel_id = excluded.channel_id
+                """,
+                (str(interaction.guild.id), str(channel.id)),
+            )
+        await interaction.response.send_message(
+            f"Girldle channel set to {channel.mention}. Results posted there will be ingested."
+        )
+
     @girldle.command(name="backfill", description="Read channel history and ingest results.")
-    @app_commands.default_permissions(administrator=True)
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(manage_guild=True)
     @app_commands.describe(
         channel="Channel to read (default: configured Girldle channel)",
         limit="Maximum messages to scan (default: all)",
@@ -299,11 +419,16 @@ class GirldleCog(commands.Cog):
         if interaction.guild is None:
             await interaction.response.send_message("Run this in the server, not in DMs.")
             return
-        if not is_admin(interaction.user, self.config):
-            await interaction.response.send_message("Admins only.")
-            return
 
-        target = channel or interaction.guild.get_channel(self.config.girldle_channel_id)
+        target = channel
+        if target is None:
+            configured = _girldle_channel_for(self.db, interaction.guild.id)
+            if configured is None:
+                await interaction.response.send_message(
+                    "No Girldle channel configured. Run `/girldle setup` first or pass `channel:`."
+                )
+                return
+            target = interaction.guild.get_channel(configured)
         if not isinstance(target, discord.TextChannel):
             await interaction.response.send_message("Could not resolve target channel.")
             return
@@ -333,15 +458,13 @@ class GirldleCog(commands.Cog):
             f"Scanned {scanned}, ingested {stored} results from #{target.name}."
         )
 
-    @girldle.command(name="reset", description="Wipe all Girldle data.")
-    @app_commands.default_permissions(administrator=True)
+    @girldle.command(name="reset", description="Wipe this server's Girldle posts.")
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(manage_guild=True)
     @app_commands.describe(confirm=f"Type '{RESET_CONFIRM_PHRASE}' to confirm.")
     async def reset(self, interaction: discord.Interaction, confirm: str) -> None:
         if interaction.guild is None:
             await interaction.response.send_message("Run this in the server, not in DMs.")
-            return
-        if not is_admin(interaction.user, self.config):
-            await interaction.response.send_message("Admins only.")
             return
         if confirm != RESET_CONFIRM_PHRASE:
             await interaction.response.send_message(
@@ -349,9 +472,59 @@ class GirldleCog(commands.Cog):
             )
             return
         with self.db.transaction() as conn:
-            conn.execute("DELETE FROM girldle_results")
-            conn.execute("DELETE FROM girldle_players")
-        await interaction.response.send_message("Wiped all Girldle data.")
+            post_cursor = conn.execute(
+                "DELETE FROM girldle_posts WHERE guild_id = ?",
+                (str(interaction.guild.id),),
+            )
+            deleted_posts = post_cursor.rowcount
+            # Drop canonical results that no longer have any sighting anywhere.
+            result_cursor = conn.execute(
+                """
+                DELETE FROM girldle_results
+                WHERE (user_id, puzzle_date) NOT IN (
+                    SELECT user_id, puzzle_date FROM girldle_posts
+                )
+                """
+            )
+            deleted_results = result_cursor.rowcount
+        ingest.recompute_ratings(self.db)
+        await interaction.response.send_message(
+            f"Wiped {deleted_posts} post{'s' if deleted_posts != 1 else ''} for this server "
+            f"({deleted_results} canonical result{'s' if deleted_results != 1 else ''} dropped, "
+            "rest still seen elsewhere). Ratings recomputed."
+        )
+
+    @girldle.command(
+        name="privacy",
+        description="Hide this server's results from the global leaderboard.",
+    )
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(
+        private="true = hide from global leaderboard, false = show (default for new servers)",
+    )
+    async def privacy(self, interaction: discord.Interaction, private: bool) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message("Run this in the server, not in DMs.")
+            return
+        with self.db.transaction() as conn:
+            row = conn.execute(
+                "SELECT channel_id FROM girldle_config WHERE guild_id = ?",
+                (str(interaction.guild.id),),
+            ).fetchone()
+            if row is None:
+                await interaction.response.send_message(
+                    "Run `/girldle setup` first to configure a channel."
+                )
+                return
+            conn.execute(
+                "UPDATE girldle_config SET private = ? WHERE guild_id = ?",
+                (1 if private else 0, str(interaction.guild.id)),
+            )
+        state = "hidden from" if private else "visible on"
+        await interaction.response.send_message(
+            f"This server's results are now {state} the global leaderboard."
+        )
 
 
 def _truncate(s: str, width: int) -> str:
