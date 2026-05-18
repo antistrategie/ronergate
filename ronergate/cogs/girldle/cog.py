@@ -72,6 +72,18 @@ class GirldleCog(commands.Cog):
         return config is not None and message.channel.id == int(config["channel_id"])
 
     @commands.Cog.listener()
+    async def on_guild_update(
+        self, before: discord.Guild, after: discord.Guild
+    ) -> None:
+        if before.name == after.name:
+            return
+        with self.db.transaction() as conn:
+            conn.execute(
+                "UPDATE girldle_config SET name = ? WHERE guild_id = ?",
+                (after.name, str(after.id)),
+            )
+
+    @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot:
             return
