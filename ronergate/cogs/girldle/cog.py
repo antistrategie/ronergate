@@ -339,6 +339,12 @@ class GirldleCog(commands.Cog):
             value=f"{int(player['rating'])} (RD {int(player['rd'])})",
             inline=True,
         )
+        ranking_score = int(player["rating"] - 3 * player["rd"])
+        embed.add_field(
+            name="Ranking score",
+            value=str(ranking_score),
+            inline=True,
+        )
         embed.add_field(name="Games", value=str(total), inline=True)
         embed.add_field(
             name="Solve rate",
