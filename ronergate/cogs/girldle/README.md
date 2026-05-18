@@ -6,12 +6,15 @@ and streaks, and exposes lookups via slash commands.
 
 ## Adding to a server
 
-1. Invite the bot with the `applications.commands`, `Read Messages`, `Send
-   Messages`, and `Read Message History` scopes.
+1. Invite the Girldle bot:
+   https://discord.com/oauth2/authorize?client_id=1505855018962780240&permissions=68608&integration_type=0&scope=bot+applications.commands
 2. As a user with `Manage Server`, run `/girldle setup #your-channel`.
-3. Optional: `/girldle privacy private:true` to keep this server's results off
-   the global leaderboard.
-4. Optional: `/girldle backfill` to ingest existing share grids in the channel.
+3. Wait for the bot operator to approve your server (see "Server approval"
+   below). Until then your players can use the bot but won't appear on the
+   global leaderboard.
+4. Optional: `/girldle privacy private:true` to keep this server's results off
+   the global leaderboard even after approval.
+5. Optional: `/girldle backfill` to ingest existing share grids in the channel.
 
 ## Commands
 
