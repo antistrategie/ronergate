@@ -80,3 +80,17 @@ def test_inconsistent_grid_width():
         "\U0001f7e9\U0001f7e9\U0001f7e9\U0001f7e9\U0001f7e9\n"
     )
     assert parse(content) is None
+
+
+def test_yellow_squares_accepted():
+    content = (
+        "Girldle 2026-05-13 4/8\n"
+        "\U0001f7e5\U0001f7e8\U0001f7e5\U0001f7e5\U0001f7e5\n"
+        "\U0001f7e5\U0001f7e8\U0001f7e8\U0001f7e5\U0001f7e5\n"
+        "\U0001f7e5\U0001f7e9\U0001f7e8\U0001f7e9\U0001f7e5\n"
+        "\U0001f7e9\U0001f7e9\U0001f7e9\U0001f7e9\U0001f7e9\n"
+    )
+    result = parse(content)
+    assert result is not None
+    assert result.score == 4
+    assert "\U0001f7e8" in result.grid  # yellow preserved in stored grid

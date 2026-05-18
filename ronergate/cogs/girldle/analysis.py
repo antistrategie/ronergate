@@ -5,10 +5,12 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
-from .parser import GREEN
+from .parser import GREEN, YELLOW
 
 # Minimum solved games to appear on the styles board.
 MIN_SOLVES = 3
+# Yellow squares (partial matches) count as half a green for the style metric.
+YELLOW_WEIGHT = 0.5
 
 
 @dataclass(frozen=True)
@@ -20,7 +22,7 @@ class PlayerGridScore:
 
 
 def _grid_auc(grid: str) -> float | None:
-    """Normalised area under the green-count curve. None if grid is unusable."""
+    """Normalised partial-match density across the grid. None if unusable."""
     rows = grid.split("\n")
     if not rows:
         return None
@@ -28,8 +30,8 @@ def _grid_auc(grid: str) -> float | None:
     if width == 0:
         return None
     total_cells = width * len(rows)
-    greens = sum(row.count(GREEN) for row in rows)
-    return greens / total_cells
+    weighted = sum(row.count(GREEN) + YELLOW_WEIGHT * row.count(YELLOW) for row in rows)
+    return weighted / total_cells
 
 
 def _player_grid_scores(

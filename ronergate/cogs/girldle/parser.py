@@ -8,7 +8,8 @@ from datetime import date
 
 RED = "\U0001f7e5"
 GREEN = "\U0001f7e9"
-GRID_CHARS = {RED, GREEN}
+YELLOW = "\U0001f7e8"
+GRID_CHARS = {RED, GREEN, YELLOW}
 
 _HEADER_RE = re.compile(
     r"^Girldle\s+(?P<date>\d{4}-\d{2}-\d{2})\s+(?P<score>\d{1,2}|X)/8\s*$",
