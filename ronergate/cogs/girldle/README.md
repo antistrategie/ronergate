@@ -31,12 +31,14 @@ and streaks, and exposes lookups via slash commands.
 
 ## Server approval
 
-When a new server runs `/girldle setup`, it's flagged as pending until the bot
-operator approves it. The operator receives a notification in
-`CONTROL_CHANNEL_ID` with **Approve** / **Deny** buttons (one click). Pending
+When a new server runs `/girldle setup`, it's flagged as pending. Pending
 servers can still play and use `scope=server` leaderboards; they just don't
 appear on the global view until approved. The bot owner's own setups are
 auto-approved.
+
+To approve: run `/girldle servers` — pending entries are marked ⏳ and the
+embed has an **Approve** button per pending guild for one-click promotion. No
+notifications are pushed; you check when you want to.
 
 ## Data model
 

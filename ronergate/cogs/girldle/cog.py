@@ -28,23 +28,18 @@ RESET_CONFIRM_PHRASE = "wipe-girldle"
 
 class _ApprovalButton(
     discord.ui.DynamicItem[discord.ui.Button],
-    template=r"girldle_(?P<action>approve|deny):(?P<guild_id>\d+)",
+    template=r"girldle_approve:(?P<guild_id>\d+)",
 ):
-    """Approve/deny button on the new-server notification. Persistent across bot restarts."""
+    """One-click approval button. Persistent across bot restarts via dynamic custom_id."""
 
-    def __init__(self, action: str, guild_id: int):
+    def __init__(self, guild_id: int, label: str | None = None):
         super().__init__(
             discord.ui.Button(
-                label=action.capitalize(),
-                style=(
-                    discord.ButtonStyle.success
-                    if action == "approve"
-                    else discord.ButtonStyle.danger
-                ),
-                custom_id=f"girldle_{action}:{guild_id}",
+                label=(label or "Approve")[:80],
+                style=discord.ButtonStyle.success,
+                custom_id=f"girldle_approve:{guild_id}",
             )
         )
-        self.action = action
         self.guild_id = guild_id
 
     @classmethod
@@ -54,30 +49,30 @@ class _ApprovalButton(
         item: discord.ui.Button,
         match: re.Match[str],
     ) -> _ApprovalButton:
-        return cls(match["action"], int(match["guild_id"]))
+        return cls(int(match["guild_id"]))
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if not await interaction.client.is_owner(interaction.user):
             await interaction.response.send_message("Owner only.", ephemeral=True)
             return
         db: Database = interaction.client.db  # type: ignore[attr-defined]
-        new_value = 1 if self.action == "approve" else 0
         with db.transaction() as conn:
             conn.execute(
-                "UPDATE girldle_config SET approved = ? WHERE guild_id = ?",
-                (new_value, str(self.guild_id)),
+                "UPDATE girldle_config SET approved = 1 WHERE guild_id = ?",
+                (str(self.guild_id),),
             )
-        verb = "✅ Approved" if self.action == "approve" else "❌ Denied"
-        await interaction.response.edit_message(
-            content=f"{verb} guild `{self.guild_id}`.",
-            view=None,
+        await interaction.response.send_message(
+            f"✅ Approved guild `{self.guild_id}`.", ephemeral=True
         )
 
 
-def _approval_view(guild_id: int) -> discord.ui.View:
+def _pending_approval_view(pending: list[tuple[int, str]]) -> discord.ui.View | None:
+    """View with one Approve button per pending (guild_id, label) tuple. None if empty."""
+    if not pending:
+        return None
     view = discord.ui.View(timeout=None)
-    view.add_item(_ApprovalButton("approve", guild_id))
-    view.add_item(_ApprovalButton("deny", guild_id))
+    for guild_id, label in pending[:25]:  # Discord cap of 25 components per message
+        view.add_item(_ApprovalButton(guild_id, label=f"Approve {label}"))
     return view
 
 
@@ -478,36 +473,9 @@ class GirldleCog(commands.Cog):
         if is_new and not is_owner:
             msg += (
                 "\nThis server is not yet approved for the global leaderboard. "
-                "The bot operator has been notified."
+                "The bot operator will see this in `/girldle servers`."
             )
         await interaction.response.send_message(msg)
-
-        if is_new and not is_owner:
-            await self._notify_pending_approval(guild, channel)
-
-    async def _notify_pending_approval(
-        self, guild: discord.Guild, channel: discord.TextChannel
-    ) -> None:
-        channel_id = self.config.control_channel_id
-        if channel_id is None:
-            log.warning(
-                "guild %s set up Girldle but CONTROL_CHANNEL_ID is unset; "
-                "no notification sent",
-                guild.id,
-            )
-            return
-        control = self.bot.get_channel(channel_id)
-        if not isinstance(control, discord.abc.Messageable):
-            log.warning("control channel %s not found in cache", channel_id)
-            return
-        body = (
-            f"🆕 New Girldle server: **{guild.name}** "
-            f"(`{guild.id}`, {guild.member_count} members, channel <#{channel.id}>)."
-        )
-        try:
-            await control.send(body, view=_approval_view(guild.id))
-        except discord.HTTPException as e:
-            log.warning("failed to post approval notice for %s: %s", guild.id, e)
 
     @girldle.command(name="backfill", description="Read channel history and ingest results.")
     @app_commands.default_permissions(manage_guild=True)
@@ -695,6 +663,7 @@ class GirldleCog(commands.Cog):
             await interaction.response.send_message("No servers configured.")
             return
         lines: list[str] = []
+        pending: list[tuple[int, str]] = []
         for row in rows:
             name = self._guild_name(row["guild_id"]) or "_(bot not in guild)_"
             if row["approved"] and not row["private"]:
@@ -703,6 +672,9 @@ class GirldleCog(commands.Cog):
                 marker = "🔒"
             else:
                 marker = "⏳"
+                # Track for Approve buttons. Fall back to ID if name unresolved.
+                label = self._guild_name(row["guild_id"]) or row["guild_id"]
+                pending.append((int(row["guild_id"]), label))
             lines.append(
                 f"{marker} **{name}** · `{row['guild_id']}` · "
                 f"<#{row['channel_id']}> · {row['posts']} posts · {row['players']} players"
@@ -713,7 +685,11 @@ class GirldleCog(commands.Cog):
             color=discord.Color.blurple(),
         )
         embed.set_footer(text="✅ approved · ⏳ pending approval · 🔒 private")
-        await interaction.response.send_message(embed=embed)
+        view = _pending_approval_view(pending)
+        if view is not None:
+            await interaction.response.send_message(embed=embed, view=view)
+        else:
+            await interaction.response.send_message(embed=embed)
 
     @girldle.command(
         name="remove",
