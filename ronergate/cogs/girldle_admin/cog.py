@@ -146,7 +146,7 @@ class GirldleAdminCog(commands.Cog):
         rows = list(
             self.db.conn.execute(
                 """
-                SELECT c.guild_id, c.channel_id, c.approved, c.private, c.name,
+                SELECT c.guild_id, c.approved, c.private, c.name,
                        (SELECT COUNT(*) FROM girldle_posts WHERE guild_id = c.guild_id) AS posts,
                        (SELECT COUNT(DISTINCT user_id) FROM girldle_posts
                         WHERE guild_id = c.guild_id) AS players
@@ -171,7 +171,7 @@ class GirldleAdminCog(commands.Cog):
                 pending.append((int(row["guild_id"]), row["name"] or row["guild_id"]))
             lines.append(
                 f"**{name}** · {status} · `{row['guild_id']}` · "
-                f"<#{row['channel_id']}> · {row['posts']} posts · {row['players']} players"
+                f"{row['posts']} posts · {row['players']} players"
             )
         embed = discord.Embed(
             title=f"Girldle servers ({len(rows)})",
