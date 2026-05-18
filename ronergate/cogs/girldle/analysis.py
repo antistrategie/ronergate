@@ -78,6 +78,24 @@ def _player_grid_scores(
     return scored[:limit]
 
 
+def player_green_density(conn: sqlite3.Connection, user_id: str) -> float | None:
+    """Average green-density across a player's solved grids. None if no solves.
+
+    Matches the metric used in `/girldle styles` (yellow counted as half-green).
+    """
+    rows = list(
+        conn.execute(
+            "SELECT grid FROM girldle_results WHERE user_id = ? AND score IS NOT NULL",
+            (user_id,),
+        )
+    )
+    densities = [_grid_auc(row["grid"]) for row in rows]
+    densities = [d for d in densities if d is not None]
+    if not densities:
+        return None
+    return sum(densities) / len(densities)
+
+
 def snipers(
     conn: sqlite3.Connection, *, guild_id: str, limit: int = 10
 ) -> list[PlayerGridScore]:

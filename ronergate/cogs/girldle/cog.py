@@ -345,6 +345,13 @@ class GirldleCog(commands.Cog):
             name="Current streak", value=_format_streak(current_streak), inline=True
         )
         embed.add_field(name="Best streak", value=_format_streak(best_streak), inline=True)
+        green_density = analysis.player_green_density(self.db.conn, str(target.id))
+        if green_density is not None:
+            embed.add_field(
+                name="Style",
+                value=f"{int(round(green_density * 100))}% green",
+                inline=True,
+            )
         embed.set_footer(text=f"Last played {player['last_played']}")
         if isinstance(target, discord.abc.User) and target.display_avatar:
             embed.set_thumbnail(url=target.display_avatar.url)
