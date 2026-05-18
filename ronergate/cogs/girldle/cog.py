@@ -15,7 +15,7 @@ from ... import errors
 from ...config import Config
 from ...db import Database
 from . import analysis, ingest
-from .parser import parse
+from .parser import GirldleResult, parse
 
 LEADERBOARD_LIMIT = 100
 NAME_DISPLAY_WIDTH = 18
@@ -254,11 +254,15 @@ class GirldleCog(commands.Cog):
             provisional = row["rd"] > PROVISIONAL_RD
             any_provisional = any_provisional or provisional
             rating_label = f"{int(row['rating'])}{'?' if provisional else ''}"
-            line = f"{rank} **{name}** · {rating_label} · {games_label} · {last}"
+            guild_suffix = ""
             if scope == "global":
                 guild_name = self._guild_name(row["primary_guild_id"])
                 if guild_name:
-                    line += f" · _{guild_name}_"
+                    guild_suffix = f" _({guild_name})_"
+            line = (
+                f"{rank} **{name}**{guild_suffix} · "
+                f"{rating_label} · {games_label} · {last}"
+            )
             lines.append(line)
         description = "\n".join(lines)
         if len(description) > 4000:
@@ -469,13 +473,28 @@ class GirldleCog(commands.Cog):
                     (str(channel.id), str(guild.id)),
                 )
 
-        msg = f"Girldle channel set to {channel.mention}. Results posted there will be ingested."
-        if is_new and not is_owner:
+        if not is_new:
+            await interaction.response.send_message(
+                f"Girldle channel updated to {channel.mention}."
+            )
+            return
+
+        await interaction.response.defer(thinking=True)
+        scanned, parsed = await _scan_channel_for_results(channel)
+        stored = ingest.ingest_messages(self.db, parsed)
+        ingest.recompute_ratings(self.db)
+
+        msg = (
+            f"Girldle channel set to {channel.mention}. "
+            f"Scanned {scanned} messages, ingested {stored} historical "
+            f"result{'s' if stored != 1 else ''}."
+        )
+        if not is_owner:
             msg += (
                 "\nThis server is not yet approved for the global leaderboard. "
                 "The bot operator will see this in `/girldle servers`."
             )
-        await interaction.response.send_message(msg)
+        await interaction.followup.send(msg)
 
     @girldle.command(name="backfill", description="Read channel history and ingest results.")
     @app_commands.default_permissions(manage_guild=True)
@@ -510,16 +529,7 @@ class GirldleCog(commands.Cog):
             return
 
         await interaction.response.defer(thinking=True)
-
-        parsed: list = []
-        scanned = 0
-        async for msg in target.history(limit=limit, oldest_first=True):
-            scanned += 1
-            if msg.author.bot:
-                continue
-            result = parse(msg.content)
-            if result is not None:
-                parsed.append((msg, result))
+        scanned, parsed = await _scan_channel_for_results(target, limit=limit)
 
         if dry_run:
             await interaction.followup.send(
@@ -731,6 +741,22 @@ class GirldleCog(commands.Cog):
             f"{result_cursor.rowcount} orphan canonical "
             f"result{'s' if result_cursor.rowcount != 1 else ''}."
         )
+
+
+async def _scan_channel_for_results(
+    channel: discord.TextChannel, limit: int | None = None
+) -> tuple[int, list[tuple[discord.Message, GirldleResult]]]:
+    """Walk a channel's history, return (scanned_count, parsed_results)."""
+    parsed: list[tuple[discord.Message, GirldleResult]] = []
+    scanned = 0
+    async for msg in channel.history(limit=limit, oldest_first=True):
+        scanned += 1
+        if msg.author.bot:
+            continue
+        result = parse(msg.content)
+        if result is not None:
+            parsed.append((msg, result))
+    return scanned, parsed
 
 
 def _truncate(s: str, width: int) -> str:
